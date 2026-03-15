@@ -3,14 +3,14 @@ import numpy as np
 import cv2
 import os
 import gdown
-import tensorflow as tf
-from tensorflow import keras
+import torch
+import torch.nn as nn
 from PIL import Image
 
-MODEL_PATH   = "model/cnn_cifar10.keras"
-GDRIVE_ID    = "1m5d_N0p_wsQo62lh5d0IXIdtxzugFAZ9"
-IMG_SIZE     = 32
-CLASS_NAMES  = [
+MODEL_PATH  = "model/cnn_cifar10.pt"
+GDRIVE_ID   = "1CiIkBhejneT2UguScocsMZqBXYhpPFTD"
+IMG_SIZE    = 32
+CLASS_NAMES = [
     "✈️ Airplane", "🚗 Automobile", "🐦 Bird",  "🐱 Cat",  "🦌 Deer",
     "🐶 Dog",      "🐸 Frog",       "🐴 Horse", "🚢 Ship", "🚛 Truck"
 ]
@@ -20,36 +20,62 @@ st.title("🔍 Real-Time Image Classifier")
 st.markdown("Upload an image and the **CNN model** will classify it into one of 10 categories.")
 st.markdown("---")
 
+# CNN architecture must match training
+class CNN(nn.Module):
+    def __init__(self, num_classes=10):
+        super(CNN, self).__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(3, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(),
+            nn.Conv2d(32, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(),
+            nn.MaxPool2d(2, 2), nn.Dropout(0.25),
+
+            nn.Conv2d(32, 64, 3, padding=1), nn.BatchNorm2d(64), nn.ReLU(),
+            nn.Conv2d(64, 64, 3, padding=1), nn.BatchNorm2d(64), nn.ReLU(),
+            nn.MaxPool2d(2, 2), nn.Dropout(0.25),
+
+            nn.Conv2d(64, 128, 3, padding=1), nn.BatchNorm2d(128), nn.ReLU(),
+            nn.Conv2d(128, 128, 3, padding=1), nn.BatchNorm2d(128), nn.ReLU(),
+            nn.MaxPool2d(2, 2), nn.Dropout(0.25),
+        )
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(128 * 4 * 4, 512), nn.BatchNorm1d(512), nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(512, num_classes)
+        )
+
+    def forward(self, x):
+        return self.classifier(self.features(x))
+
 @st.cache_resource
 def load_model():
     if not os.path.exists(MODEL_PATH):
         os.makedirs("model", exist_ok=True)
-        with st.spinner("Downloading model... please wait"):
-            gdown.download(
-                f"https://drive.google.com/uc?id={GDRIVE_ID}",
-                MODEL_PATH,
-                quiet=False
-            )
-    return keras.models.load_model(MODEL_PATH)
+        st.info("Downloading model... please wait")
+        gdown.download(
+            f"https://drive.google.com/uc?id={GDRIVE_ID}",
+            MODEL_PATH, quiet=False
+        )
+    model = CNN()
+    model.load_state_dict(torch.load(MODEL_PATH, map_location="cpu"))
+    model.eval()
+    return model
 
 try:
     model = load_model()
     st.success("✅ Model loaded!")
 except Exception as e:
-    st.error(f"❌ Error loading model: {e}")
+    st.error(f"❌ Error: {e}")
     st.stop()
 
 def preprocess(pil_image):
     img = np.array(pil_image.convert("RGB"))
     img = cv2.resize(img, (IMG_SIZE, IMG_SIZE), interpolation=cv2.INTER_AREA)
     img = img.astype("float32") / 255.0
-    img = np.expand_dims(img, axis=0)
+    img = torch.tensor(img).permute(2, 0, 1).unsqueeze(0)
     return img
 
-uploaded_file = st.file_uploader(
-    "Choose an image",
-    type=["jpg", "jpeg", "png", "bmp", "webp"]
-)
+uploaded_file = st.file_uploader("Choose an image", type=["jpg","jpeg","png","bmp","webp"])
 
 if uploaded_file:
     pil_image = Image.open(uploaded_file)
@@ -57,11 +83,13 @@ if uploaded_file:
 
     with col1:
         st.subheader("📷 Your Image")
-        st.image(pil_image, use_column_width=True)
+        st.image(pil_image, use_container_width=True)
 
-    img_array = preprocess(pil_image)
+    img_tensor = preprocess(pil_image)
     with st.spinner("Classifying..."):
-        probs      = model.predict(img_array, verbose=0)[0]
+        with torch.no_grad():
+            outputs = model(img_tensor)
+            probs   = torch.softmax(outputs, dim=1)[0].numpy()
         top_idx    = int(np.argmax(probs))
         top_label  = CLASS_NAMES[top_idx]
         confidence = float(probs[top_idx])
@@ -83,16 +111,6 @@ if uploaded_file:
         with col_c:
             st.write(f"{prob*100:.1f}%")
 
-    st.markdown("---")
-    st.subheader("🔬 What the model sees (32×32)")
-    small = cv2.resize(
-        np.array(pil_image.convert("RGB")),
-        (IMG_SIZE, IMG_SIZE),
-        interpolation=cv2.INTER_AREA
-    )
-    display = cv2.resize(small, (160, 160), interpolation=cv2.INTER_NEAREST)
-    st.image(display, width=160)
-
 else:
     st.info("👆 Upload an image to get started!")
     st.markdown("""
@@ -105,4 +123,4 @@ else:
     """)
 
 st.markdown("---")
-st.caption("Built with TensorFlow · Keras · OpenCV · Streamlit")
+st.caption("Built with PyTorch · OpenCV · Streamlit")
