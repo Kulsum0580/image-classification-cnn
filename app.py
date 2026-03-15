@@ -1,13 +1,16 @@
 import streamlit as st
 import numpy as np
 import cv2
+import os
+import gdown
 import tensorflow as tf
 from tensorflow import keras
 from PIL import Image
 
-MODEL_PATH  = "model/cnn_cifar10.keras"
-IMG_SIZE    = 32
-CLASS_NAMES = [
+MODEL_PATH   = "model/cnn_cifar10.keras"
+GDRIVE_ID    = "1m5d_N0p_wsQo62lh5d0IXIdtxzugFAZ9"
+IMG_SIZE     = 32
+CLASS_NAMES  = [
     "✈️ Airplane", "🚗 Automobile", "🐦 Bird",  "🐱 Cat",  "🦌 Deer",
     "🐶 Dog",      "🐸 Frog",       "🐴 Horse", "🚢 Ship", "🚛 Truck"
 ]
@@ -19,13 +22,21 @@ st.markdown("---")
 
 @st.cache_resource
 def load_model():
+    if not os.path.exists(MODEL_PATH):
+        os.makedirs("model", exist_ok=True)
+        with st.spinner("Downloading model... please wait"):
+            gdown.download(
+                f"https://drive.google.com/uc?id={GDRIVE_ID}",
+                MODEL_PATH,
+                quiet=False
+            )
     return keras.models.load_model(MODEL_PATH)
 
 try:
     model = load_model()
     st.success("✅ Model loaded!")
 except Exception as e:
-    st.error("❌ Model not found. Please run train.py first.")
+    st.error(f"❌ Error loading model: {e}")
     st.stop()
 
 def preprocess(pil_image):
@@ -35,7 +46,10 @@ def preprocess(pil_image):
     img = np.expand_dims(img, axis=0)
     return img
 
-uploaded_file = st.file_uploader("Choose an image", type=["jpg", "jpeg", "png", "bmp", "webp"])
+uploaded_file = st.file_uploader(
+    "Choose an image",
+    type=["jpg", "jpeg", "png", "bmp", "webp"]
+)
 
 if uploaded_file:
     pil_image = Image.open(uploaded_file)
@@ -71,8 +85,11 @@ if uploaded_file:
 
     st.markdown("---")
     st.subheader("🔬 What the model sees (32×32)")
-    small = cv2.resize(np.array(pil_image.convert("RGB")),
-                       (IMG_SIZE, IMG_SIZE), interpolation=cv2.INTER_AREA)
+    small = cv2.resize(
+        np.array(pil_image.convert("RGB")),
+        (IMG_SIZE, IMG_SIZE),
+        interpolation=cv2.INTER_AREA
+    )
     display = cv2.resize(small, (160, 160), interpolation=cv2.INTER_NEAREST)
     st.image(display, width=160)
 
@@ -89,5 +106,3 @@ else:
 
 st.markdown("---")
 st.caption("Built with TensorFlow · Keras · OpenCV · Streamlit")
-
-
